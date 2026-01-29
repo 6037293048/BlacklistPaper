@@ -6,11 +6,20 @@ const app = express();
 
 app.use(express.json());
 
+/* =========================
+   CONFIG
+   ========================= */
 const API_KEY = "fKXmTzikuP24ES7wyJ95R3YCGhkLSc99";
+const PORT = process.env.PORT || 3000;
 
 /* =========================
-   DATABASE (Render)
+   DATABASE (RENDER)
    ========================= */
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is missing!");
+  process.exit(1);
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -26,33 +35,38 @@ await pool.query(`
   );
 `);
 
+console.log("Blacklist table ready");
+
 /* =========================
    AUTH MIDDLEWARE
    ========================= */
 app.use((req, res, next) => {
   if (req.headers.authorization !== API_KEY) {
-    return res.sendStatus(401);
+    return res.status(401).send("Unauthorized");
   }
   next();
 });
 
 /* =========================
-   ADD BAN
+   ADD TO BLACKLIST
    ========================= */
 app.post("/ban", async (req, res) => {
   const { uuid, reason } = req.body;
   if (!uuid) return res.status(400).send("UUID missing");
 
   await pool.query(
-    "INSERT INTO blacklist (uuid, reason) VALUES ($1, $2) ON CONFLICT (uuid) DO UPDATE SET reason = $2",
-    [uuid, reason || "No reason provided"]
+    `INSERT INTO blacklist (uuid, reason)
+     VALUES ($1, $2)
+     ON CONFLICT (uuid)
+     DO UPDATE SET reason = $2`,
+    [uuid, reason || "Blacklisted"]
   );
 
   res.sendStatus(200);
 });
 
 /* =========================
-   REMOVE BAN
+   REMOVE BLACKLIST
    ========================= */
 app.delete("/ban/:uuid", async (req, res) => {
   await pool.query(
@@ -63,7 +77,7 @@ app.delete("/ban/:uuid", async (req, res) => {
 });
 
 /* =========================
-   CHECK BAN
+   CHECK BLACKLIST
    ========================= */
 app.get("/ban/:uuid", async (req, res) => {
   const result = await pool.query(
@@ -71,16 +85,16 @@ app.get("/ban/:uuid", async (req, res) => {
     [req.params.uuid]
   );
 
-  if (result.rowCount > 0) {
-    res.status(200).json({ reason: result.rows[0].reason });
-  } else {
-    res.sendStatus(404);
+  if (result.rowCount === 0) {
+    return res.sendStatus(404);
   }
+
+  res.json({ reason: result.rows[0].reason });
 });
 
 /* =========================
-   START
+   START SERVER
    ========================= */
-app.listen(3000, () => {
-  console.log("Global Blacklist API running (PostgreSQL)");
+app.listen(PORT, () => {
+  console.log("Blacklist API running on port " + PORT);
 });
